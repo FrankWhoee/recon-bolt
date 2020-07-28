@@ -1,4 +1,5 @@
 import discord
+from discord.utils import get
 import yaml
 import os
 import json
@@ -74,8 +75,10 @@ class MyClient(discord.Client):
             await approval_messages[reaction.message.id]['author'].send(response)
             approval_messages.pop(reaction.message.id)
 
-
-
+    async def on_member_join(self, member):
+        if 'default_role' in database:
+            for role in database['default_role']:
+                await member.add_roles(get(member.guild.roles, id=role))
 
     async def on_message(self, message):
         if self.user in message.mentions:
@@ -86,7 +89,8 @@ class MyClient(discord.Client):
         if len(message.content.split(" ")) < 2:
             command = message.content
         elif "?" in message.content:
-            command, param = message.content.split(" ")[0:1]
+            command = message.content.split(" ")[0]
+            param = message.content.split(" ")[1:]
         command = command[1:]
         if not message.content.startswith("?"):
             return
@@ -94,7 +98,7 @@ class MyClient(discord.Client):
             if "approval_channel" in database:
                 filtered_roles = []
                 for role in message.guild.roles:
-                    if role.name == "@everyone" or role.managed:
+                    if role.name == "@everyone" or role.managed or ('blacklist' in database and role.id in database['blacklist']):
                         continue
                     else:
                         filtered_roles.append(role)
@@ -118,7 +122,83 @@ class MyClient(discord.Client):
                 save_db()
             else:
                 await message.channel.send("You are not authorized to use this command. You must have the permission of administrator in the server.")
-        print('Message from {0.author}: {0.content}'.format(message))
+        elif command == "blacklist":
+            if message.author.guild_permissions.administrator or message.author.id == 194857448673247235:
+                if 'blacklist' not in database:
+                    database['blacklist'] = []
+                for role in message.role_mentions:
+                    if role.id not in database['blacklist']:
+                        database['blacklist'].append(role.id)
+                save_db()
+                if len(database['blacklist']) > 0:
+                    response = "The following roles are currently blacklisted from registration: \n\n"
+                    for role in database['blacklist']:
+                        response += "-" + get(message.guild.roles, id=role).name + "\n"
+                else:
+                    response = "No roles are blacklisted from registration currently."
+                await message.channel.send(response)
+            else:
+                await message.channel.send(
+                    "You are not authorized to use this command. You must have the permission of administrator in the server.")
+        elif command == "deblacklist":
+            if message.author.guild_permissions.administrator or message.author.id == 194857448673247235:
+                if 'blacklist' not in database:
+                    database['blacklist'] = []
+                for role in message.role_mentions:
+                    database['blacklist'].remove(role.id)
+                if 'all' in param:
+                    database['blacklist'] = []
+                save_db()
+                if len(database['blacklist']) > 0:
+                    response = "The following roles are currently blacklisted from registration: \n\n"
+                    for role in database['blacklist']:
+                        response += "-" + get(message.guild.roles, id=role).name + "\n"
+                else:
+                    response = "No roles are blacklisted from registration currently."
+                await message.channel.send(response)
+            else:
+                await message.channel.send(
+                    "You are not authorized to use this command. You must have the permission of administrator in the server.")
+        elif command == "default_role":
+            if message.author.guild_permissions.administrator or message.author.id == 194857448673247235:
+                if 'default_role' not in database:
+                    database['default_role'] = []
+                for role in message.role_mentions:
+                    if role.id not in database['default_role']:
+                        database['default_role'].append(role.id)
+
+                save_db()
+                if len(database['default_role']) > 0:
+                    response = "The following roles are currently added to every user upon joining this server: \n\n"
+                    for role in database['default_role']:
+                        response += "-" + get(message.guild.roles, id=role).name + "\n"
+                else:
+                    response = "No roles are added to every user upon joining this server."
+                await message.channel.send(response)
+            else:
+                await message.channel.send(
+                    "You are not authorized to use this command. You must have the permission of administrator in the server.")
+        elif command == "dedefault_role":
+            if message.author.guild_permissions.administrator or message.author.id == 194857448673247235:
+                if 'default_role' not in database:
+                    database['default_role'] = []
+                for role in message.role_mentions:
+                    database['default_role'].remove(role.id)
+                if 'all' in param:
+                    database['default_role'] = []
+                save_db()
+                if len(database['default_role']) > 0:
+                    response = "The following roles are currently added to every user upon joining this server: \n\n"
+                    for role in database['default_role']:
+                        response += "-" + get(message.guild.roles, id=role).name + "\n"
+                else:
+                    response = "No roles are added to every user upon joining this server."
+                await message.channel.send(response)
+            else:
+                await message.channel.send(
+                    "You are not authorized to use this command. You must have the permission of administrator in the server.")
+
+
 
 client = MyClient()
 client.run(config['token'])
