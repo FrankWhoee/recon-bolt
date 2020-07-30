@@ -3,6 +3,9 @@ from discord.utils import get
 import yaml
 import os
 import json
+import asyncio
+from datetime import datetime
+from requests import get
 
 if os.path.exists("database.json"):
     with open('database.json', 'r') as file:
@@ -197,8 +200,113 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send(
                     "You are not authorized to use this command. You must have the permission of administrator in the server.")
+        elif command=="set_hiking":
+            if message.author.guild_permissions.administrator or message.author.id == 194857448673247235:
+                database['hiking_channel'] = message.channel.id
+                save_db()
+                await message.channel.send("This channel has been set to receive hiking posts.")
+            else:
+                await message.channel.send(
+                    "You are not authorized to use this command. You must have the permission of administrator in the server.")
 
 
+def get_weather(score_sorted=False):
+    r = get("https://api.openweathermap.org/data/2.5/onecall?lat=49.279&lon=-122.973&appid=" + config[
+        'weather-token'] + "&units=metric")
+    weather_data = json.loads(r.text)
+    scores = []
+    for day in weather_data["daily"]:
+        score = 0
+        detail = {}
+        detail["dt"] = day["dt"]
+        detail["icon"] = 'http://openweathermap.org/img/wn/' + day["weather"][0]["icon"] + '@2x.png'
+        # Dew point score
+        dewp = 0
+        if day["dew_point"] > 15.56:
+            dewp = day["dew_point"] - 15.56
+        elif day["dew_point"] < 12.78:
+            dewp = 12.78 - day["dew_point"]
+        dewp *= 2
+        score += dewp
+
+        detail['dew_point'] = day["dew_point"]
+
+        # Temperature score
+        maxtemp = 0
+        if day["temp"]["max"] > 25:
+            maxtemp = day["temp"]["max"] - 25
+        elif day["temp"]["max"] < 15:
+            maxtemp = 15 - day["temp"]["max"]
+        maxtemp *= 3
+        score += maxtemp
+
+        detail['maxtemp'] = day["temp"]["max"]
+
+        # Temperature score
+        morntemp = 0
+        if day["temp"]["morn"] > 20:
+            morntemp = day["temp"]["morn"] - 20
+        elif day["temp"]["morn"] < 15:
+            morntemp = 15 - day["temp"]["morn"]
+        morntemp *= 1.5
+        score += morntemp
+
+        detail['morntemp'] = day["temp"]["morn"]
+
+        # Cloudiness score
+        clouds = 0
+        if day["clouds"] > 25:
+            clouds = (day["clouds"] - 25)
+        elif day["clouds"] < 25:
+            clouds = (25 - day["clouds"])
+        clouds *= 0.09
+        score += clouds
+
+        detail['clouds'] = day["clouds"]
+
+        # UVI score
+        uvi = day["uvi"] * 0.5
+        score += uvi
+
+        detail['uvi'] = day["uvi"]
+
+        # Probability of Precipiation score
+        pop = day["pop"] * 100
+        score += pop
+
+        detail['pop'] = day["pop"]
+        detail['score'] = score
+        scores.append(detail)
+    if score_sorted:
+        return sorted(scores, key=lambda k: k['score'])
+    else:
+        return scores
 
 client = MyClient()
+
+async def hike_posting():
+    await client.wait_until_ready()
+    while not client.is_closed():
+        # if datetime.today().weekday() == 6 and datetime.today().hour > 8 and 'hiking' in database:
+
+        for score in get_weather(score_sorted=True):
+            if score["score"] < 50:
+                colour = discord.Colour(0).from_rgb(r=int(255 * (score["score"]/50)), g=255, b=0)
+            elif score["score"] >= 50 and score["score"] <= 100:
+                colour = discord.Colour(0).from_rgb(r=255, g=int(255 * (1 - ((score["score"] - 50) / 50))), b=0)
+            embed = discord.Embed(title=datetime.fromtimestamp(score["dt"]).strftime("%A, %B %-d"), description="Recon Score: " + str(round(score["score"],2)), color=colour)
+            embed.set_thumbnail(url=score["icon"])
+            embed.add_field(name="Peak Temperature", value=str(score["maxtemp"]) + "°C", inline=False)
+            embed.add_field(name="Morning Temperature", value=str(score["morntemp"]) + "°C", inline=False)
+            embed.add_field(name="Cloudiness", value=str(score["clouds"]) + "%", inline=True)
+            embed.add_field(name="UV Index", value=str(score["uvi"]) + "/11", inline=True)
+            embed.add_field(name="Chance of Precipitation", value=str(round(score["pop"] * 100,2)) + "%", inline=True)
+            m = await client.get_user(194857448673247235).send(embed=embed)
+            await m.add_reaction("✅")
+            await m.add_reaction("❌")
+            # await client.get_channel(database['hiking_channel']).send(embed=embed)
+
+        await asyncio.sleep(3600)
+
+client.loop.create_task(hike_posting())
 client.run(config['token'])
