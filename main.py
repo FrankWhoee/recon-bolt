@@ -7,6 +7,8 @@ import asyncio
 from datetime import datetime
 from requests import get
 
+hike_posted = False
+
 if os.path.exists("database.json"):
     with open('database.json', 'r') as file:
         database = json.load(file)
@@ -35,6 +37,7 @@ def dekeycapize(keycap: str):
 
 register_messages = {}
 approval_messages = {}
+hiking_messages = []
 
 class MyClient(discord.Client):
     async def on_ready(self):
@@ -77,6 +80,7 @@ class MyClient(discord.Client):
                 response += "-" + role.name + "\n"
             await approval_messages[reaction.message.id]['author'].send(response)
             approval_messages.pop(reaction.message.id)
+
 
     async def on_member_join(self, member):
         if 'default_role' in database:
@@ -208,6 +212,22 @@ class MyClient(discord.Client):
             else:
                 await message.channel.send(
                     "You are not authorized to use this command. You must have the permission of administrator in the server.")
+        elif command == "weather" or command == "recon" or command == "hike" or command == "hiking":
+            for score in get_weather():
+                if score["score"] < 50:
+                    colour = discord.Colour(0).from_rgb(r=int(255 * (score["score"] / 50)), g=255, b=0)
+                elif score["score"] >= 50 and score["score"] <= 100:
+                    colour = discord.Colour(0).from_rgb(r=255, g=int(255 * (1 - ((score["score"] - 50) / 50))), b=0)
+                embed = discord.Embed(title=datetime.fromtimestamp(score["dt"]).strftime("%A, %B %-d"),
+                                      description="Recon Score: " + str(round(score["score"], 2)), color=colour)
+                embed.set_thumbnail(url=score["icon"])
+                embed.add_field(name="Peak Temperature", value=str(score["maxtemp"]) + "°C", inline=False)
+                embed.add_field(name="Morning Temperature", value=str(score["morntemp"]) + "°C", inline=False)
+                embed.add_field(name="Cloudiness", value=str(score["clouds"]) + "%", inline=True)
+                embed.add_field(name="UV Index", value=str(score["uvi"]) + "/11", inline=True)
+                embed.add_field(name="Chance of Precipitation", value=str(round(score["pop"] * 100, 2)) + "%",
+                                inline=True)
+                await message.channel.send(embed=embed)
 
 
 def get_weather(score_sorted=False):
@@ -287,9 +307,13 @@ client = MyClient()
 async def hike_posting():
     await client.wait_until_ready()
     while not client.is_closed():
-        # if datetime.today().weekday() == 6 and datetime.today().hour > 8 and 'hiking' in database:
-
+        # if datetime.today().weekday() == 6 and datetime.today().hour > 8 and 'hiking' in database and not hike_posted:
+        global hike_posted
+        hike_posted = True
+        i = 0
         for score in get_weather(score_sorted=True):
+            if i == 3:
+                break
             if score["score"] < 50:
                 colour = discord.Colour(0).from_rgb(r=int(255 * (score["score"]/50)), g=255, b=0)
             elif score["score"] >= 50 and score["score"] <= 100:
@@ -304,7 +328,33 @@ async def hike_posting():
             m = await client.get_user(194857448673247235).send(embed=embed)
             await m.add_reaction("✅")
             await m.add_reaction("❌")
+            hiking_messages.append((m,embed))
+            i += 1
             # await client.get_channel(database['hiking_channel']).send(embed=embed)
+        # Sleeps for 24 hours, then checks votes on hike days, if poll was not ended early.
+        await asyncio.sleep(86400)
+        if hike_posted:
+            votes = []
+            for m, embed in hiking_messages:
+                count = 0
+                subscribed = []
+                for reaction in m.reactions:
+                    if reaction.emoji == "✅":
+                        count += reaction.count
+                        subscribed = await reaction.users().flatten()
+                    elif reaction.emoji == "❌":
+                        count -= reaction.count
+                votes.append({
+                    "embed": embed,
+                    "message": m,
+                    "votes": count,
+                    "subscribed": subscribed
+                })
+            sorted(votes, key=lambda k: k['votes'])
+            response = "Hiking date has been set. You will receive notifications and updates for this hiking trip.\n\n"
+            for sub in votes[len(votes) - 1]["subscribed"]:
+                response += sub.mention + " "
+            await client.get_user(194857448673247235).send(response, embed=votes[len(votes) - 1]["embed"])
 
         await asyncio.sleep(3600)
 
