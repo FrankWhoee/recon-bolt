@@ -88,6 +88,8 @@ class MyClient(discord.Client):
                 await member.add_roles(get(member.guild.roles, id=role))
 
     async def on_message(self, message):
+        global hike_posted
+        global hiking_messages
         if self.user in message.mentions:
             await message.channel.send("suck my dick asshole")
         member = message.author
@@ -228,6 +230,61 @@ class MyClient(discord.Client):
                 embed.add_field(name="Chance of Precipitation", value=str(round(score["pop"] * 100, 2)) + "%",
                                 inline=True)
                 await message.channel.send(embed=embed)
+        elif command == "end_poll":
+            if hike_posted:
+                hike_posted = False
+                votes = []
+                for m, embed in hiking_messages:
+                    count = 0
+                    subscribed = []
+                    for reaction in discord.utils.get(client.cached_messages, id=m.id).reactions:
+                        if reaction.emoji == "✅":
+                            count += reaction.count
+                            subscribed = await reaction.users().flatten()
+                            subscribed.remove(client.user)
+                        elif reaction.emoji == "❌":
+                            count -= reaction.count
+                    votes.append({
+                        "embed": embed,
+                        "message": m,
+                        "votes": count,
+                        "subscribed": subscribed
+                    })
+                votes_sorted = sorted(votes, key=lambda k: k['votes'])
+
+                if votes_sorted[0]["votes"] == votes_sorted[len(votes_sorted) - 1]["votes"]:
+                    await client.get_user(194857448673247235).send(
+                        "No hiking date set because no one voted. To retrigger a poll, type ?poll")
+                else:
+                    response = "Hiking date has been set. You will receive notifications and updates for this hiking trip.\n\n"
+                    for sub in votes_sorted[len(votes_sorted) - 1]["subscribed"]:
+                        response += sub.mention + " "
+                    votes_sorted[len(votes_sorted) - 1]["embed"]._colour = discord.Colour(0x1E90FF)
+                    await client.get_user(194857448673247235).send(response,
+                                                                   embed=votes_sorted[len(votes_sorted) - 1]["embed"])
+                hiking_messages = []
+        elif command == "poll":
+            await client.get_user(194857448673247235).send("Poll has been triggered manually and will close on Monday 8 AM. Use ?end_poll to tally votes.")
+            hike_posted = True
+            for score in get_weather(score_sorted=True):
+                if score["score"] < 50:
+                    colour = discord.Colour(0).from_rgb(r=int(255 * (score["score"] / 50)), g=255, b=0)
+                elif score["score"] >= 50 and score["score"] <= 100:
+                    colour = discord.Colour(0).from_rgb(r=255, g=int(255 * (1 - ((score["score"] - 50) / 50))), b=0)
+                embed = discord.Embed(title=datetime.fromtimestamp(score["dt"]).strftime("%A, %B %-d"),
+                                      description="Recon Score: " + str(round(score["score"], 2)), color=colour)
+                embed.set_thumbnail(url=score["icon"])
+                embed.add_field(name="Peak Temperature", value=str(score["maxtemp"]) + "°C", inline=False)
+                embed.add_field(name="Morning Temperature", value=str(score["morntemp"]) + "°C", inline=False)
+                embed.add_field(name="Cloudiness", value=str(score["clouds"]) + "%", inline=True)
+                embed.add_field(name="UV Index", value=str(score["uvi"]) + "/11", inline=True)
+                embed.add_field(name="Chance of Precipitation", value=str(round(score["pop"] * 100, 2)) + "%",
+                                inline=True)
+                m = await client.get_user(194857448673247235).send(embed=embed)
+                await m.add_reaction("✅")
+                await m.add_reaction("❌")
+                hiking_messages.append((m, embed))
+                # await client.get_channel(database['hiking_channel']).send(embed=embed)
 
 
 def get_weather(score_sorted=False):
@@ -275,10 +332,11 @@ def get_weather(score_sorted=False):
 
         # Cloudiness score
         clouds = 0
-        if day["clouds"] > 25:
-            clouds = (day["clouds"] - 25)
-        elif day["clouds"] < 25:
-            clouds = (25 - day["clouds"])
+        optimal_cloudiness = 50
+        if day["clouds"] > optimal_cloudiness:
+            clouds = (day["clouds"] - optimal_cloudiness)
+        elif day["clouds"] < optimal_cloudiness:
+            clouds = (optimal_cloudiness - day["clouds"])
         clouds *= 0.09
         score += clouds
 
@@ -332,16 +390,19 @@ async def hike_posting():
             i += 1
             # await client.get_channel(database['hiking_channel']).send(embed=embed)
         # Sleeps for 24 hours, then checks votes on hike days, if poll was not ended early.
-        await asyncio.sleep(86400)
+        # await asyncio.sleep(86400)
+        await asyncio.sleep(20)
         if hike_posted:
+            hike_posted = False
             votes = []
             for m, embed in hiking_messages:
                 count = 0
                 subscribed = []
-                for reaction in m.reactions:
+                for reaction in discord.utils.get(client.cached_messages, id=m.id).reactions:
                     if reaction.emoji == "✅":
                         count += reaction.count
                         subscribed = await reaction.users().flatten()
+                        subscribed.remove(client.user)
                     elif reaction.emoji == "❌":
                         count -= reaction.count
                 votes.append({
@@ -350,11 +411,17 @@ async def hike_posting():
                     "votes": count,
                     "subscribed": subscribed
                 })
-            sorted(votes, key=lambda k: k['votes'])
-            response = "Hiking date has been set. You will receive notifications and updates for this hiking trip.\n\n"
-            for sub in votes[len(votes) - 1]["subscribed"]:
-                response += sub.mention + " "
-            await client.get_user(194857448673247235).send(response, embed=votes[len(votes) - 1]["embed"])
+            votes_sorted = sorted(votes, key=lambda k: k['votes'])
+
+            if votes_sorted[0]["votes"] == votes_sorted[len(votes_sorted) - 1]["votes"]:
+                await client.get_user(194857448673247235).send("No hiking date set because no one voted. To retrigger a poll, type ?poll")
+            else:
+                response = "Hiking date has been set. You will receive notifications and updates for this hiking trip.\n\n"
+                for sub in votes_sorted[len(votes_sorted) - 1]["subscribed"]:
+                    response += sub.mention + " "
+                votes_sorted[len(votes_sorted) - 1]["embed"]._colour = discord.Colour(0x1E90FF)
+                await client.get_user(194857448673247235).send(response, embed=votes_sorted[len(votes_sorted) - 1]["embed"])
+            hiking_messages = []
 
         await asyncio.sleep(3600)
 
