@@ -238,11 +238,19 @@ class MyClient(discord.Client):
            for embed in get_embeds():
                 await message.channel.send(embed=embed)
         elif command == "end_poll":
-            end_poll(message.channel)
+            await end_poll(message.channel)
         elif command == "poll":
-            await message.channel.send(
-                "Poll has been triggered manually and will close on Monday 8 AM. Use ?end_poll to tally votes.")
-            post_poll(message.channel, limit=7)
+            if hike_posted:
+                await message.channel.send("A hike has already been posted. Please end that one first.")
+            else:
+                if param:
+                    await message.channel.send(
+                        "Poll has been triggered manually and will close on Monday 8 AM. Use ?end_poll to tally votes.")
+                    await post_poll(message.channel, limit=int(param[0]))
+                else:
+                    await message.channel.send(
+                        "Poll has been triggered manually and will close on Monday 8 AM. Use ?end_poll to tally votes.")
+                    await post_poll(message.channel, limit=7)
         elif command == "today":
             await message.channel.send(embed=get_embeds()[0])
 
@@ -421,13 +429,11 @@ async def post_poll(channel, limit=3):
 async def hike_posting():
     await client.wait_until_ready()
     while not client.is_closed():
-        # if datetime.today().weekday() == 6 and datetime.today().hour > 8 and 'hiking' in database and not hike_posted:
-        await post_poll(client.get_user(194857448673247235))
-        # Sleeps for 24 hours, then checks votes on hike days, if poll was not ended early.
-        # await asyncio.sleep(86400)
-        await asyncio.sleep(20)
-        # end_poll(client.get_channel(database['hiking_channel']))
-        await end_poll(client.get_user(194857448673247235))
+        if datetime.today().weekday() == 6 and datetime.today().hour > 8 and 'hiking' in database and not hike_posted:
+            await post_poll(client.get_channel(database['hiking_channel']))
+            # Sleeps for 24 hours, then checks votes on hike days, if poll was not ended early.
+            await asyncio.sleep(86400)
+            end_poll(client.get_channel(database['hiking_channel']))
         await asyncio.sleep(3600)
 
 
